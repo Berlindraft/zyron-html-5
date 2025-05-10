@@ -6,7 +6,6 @@ const app = express();
 
 app.set('trust proxy', true);
 
-// Configure transporter
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -21,7 +20,6 @@ app.get('/', async (req, res) => {
   const referrer = req.headers['referer'] || 'direct';
   const timestamp = new Date().toISOString();
 
-  // Device parsing
   const parser = new UAParser(userAgent);
   const device = parser.getDevice();
   const os = parser.getOS();
@@ -38,7 +36,6 @@ app.get('/', async (req, res) => {
   let geoAddress = 'N/A';
 
   try {
-    // Get IP-based geo info
     const geo = await axios.get(`http://ip-api.com/json/${ip}`);
     const { city, regionName, country, isp, lat, lon, timezone: tz } = geo.data;
 
@@ -46,7 +43,6 @@ app.get('/', async (req, res) => {
     coordinates = `Latitude: ${lat}, Longitude: ${lon}`;
     timezone = tz || 'N/A';
 
-    // Reverse geocoding using OpenCage API
     const OPEN_CAGE_KEY = 'cd07cd206f6a4f7086bed7fa65741f82';
     const reverseGeo = await axios.get(`https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${OPEN_CAGE_KEY}`);
     const components = reverseGeo.data.results[0]?.formatted;
