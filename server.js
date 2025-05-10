@@ -2,7 +2,8 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const app = express();
 
-// Email configuration
+app.set('trust proxy', true);
+
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -11,7 +12,6 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// Track all visits to the root URL
 app.get('/', (req, res) => {
   const ip = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const userAgent = req.headers['user-agent'];
@@ -20,9 +20,8 @@ app.get('/', (req, res) => {
 
   console.log(`Visit from IP: ${ip}`);
 
-  // Send email notification
   const mailOptions = {
-    from: 'staysane.rz@gmail.com',
+    from: 'zyron',
     to: 'xraymundzyron@gmail.com',
     subject: 'Visitor accessed your URL',
     text: `New visit detected!\n
@@ -36,8 +35,7 @@ app.get('/', (req, res) => {
     if (error) console.error('Email failed:', error);
   });
 
-  // Immediately redirect to your actual destination
-        res.sendFile(__dirname + '/index.html');
+  res.sendFile(__dirname + '/index.html');
 });
 
 const PORT = process.env.PORT || 3000;
