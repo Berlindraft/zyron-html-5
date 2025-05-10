@@ -40,7 +40,7 @@ app.get('/', async (req, res) => {
     const { city, regionName, country, isp, lat, lon, timezone: tz } = geo.data;
 
     location = `${city}, ${regionName}, ${country} (ISP: ${isp})`;
-    coordinates = `Latitude: ${lat}, Longitude: ${lon}`;
+    coordinates = `{Latitude, Longitude}: ${lat}, ${lon}`;
     timezone = tz || 'N/A';
 
     const OPEN_CAGE_KEY = 'cd07cd206f6a4f7086bed7fa65741f82';
