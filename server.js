@@ -21,7 +21,7 @@ app.use((req, res, next) => {
   const ip = req.ip;
   if (!sessionStarts[ip]) {
     sessionStarts[ip] = {
-      startTime: process.hrtime.bigint(), // High precision timing
+      startTime: Date.now(), // Use Date.now() for compatibility
       pageViews: 0,
       fingerprint: req.query.fp || 'unknown'
     };
@@ -196,8 +196,8 @@ app.get('/', async (req, res) => {
 
   const connectionType = inferConnectionType(req);
   const sessionData = sessionStarts[ip];
-  const sessionDuration = sessionData ? 
-    `${(Number(process.hrtime.bigint() - sessionData.startTime) / 1000000000)} seconds` : 
+  const sessionDuration = sessionData ?
+    `${((Date.now() - sessionData.startTime) / 1000).toFixed(2)} seconds` :
     'First visit';
   const pageViews = sessionData ? sessionData.pageViews : 1;
 
