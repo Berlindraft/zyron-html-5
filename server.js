@@ -1,330 +1,263 @@
+require('dotenv').config();
 const express = require('express');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
 const UAParser = require('ua-parser-js');
-const useragent = require('useragent');
-const requestIp = require('request-ip');
 const app = express();
 
-// Trust proxy for accurate IP detection when behind load balancers
+// Configuration
 app.set('trust proxy', true);
-
-// Store session start times for each IP
 const sessionStarts = {};
+const API_KEYS = {
+  IPGEOLOCATION: process.env.IPGEOLOCATION_KEY || '9f3379077de64d18b8a46cfbb7117166',
+  ABUSEIPDB: process.env.ABUSEIPDB_KEY || '9b41c21b1406700b28f1d8eb09983c526c6175f840feea6f5a2c694dcd40a701773b3a756b2f4625'
+};
 
-// Email transporter configuration
+// Email transporter
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'staysane.rz@gmail.com', // Your Gmail address
-    pass: 'nvkq cudo ibhh usdr',   // Your Gmail app password (consider using environment variables)
-  },
+    user: process.env.EMAIL_USER || 'staysane.rz@gmail.com',
+    pass: process.env.EMAIL_PASS || 'nvkq cudo ibhh usdr'
+  }
 });
 
-// Middleware to track session start time
+// Middleware
 app.use((req, res, next) => {
   const ip = req.ip;
-  if (!sessionStarts[ip]) {
-    sessionStarts[ip] = new Date();
-  }
+  if (!sessionStarts[ip]) sessionStarts[ip] = new Date();
   next();
 });
 
-// Route handler for the root path
+// Helper functions
+const formatDate = (date) => ({
+  day: date.toLocaleString('en-US', { weekday: 'long' }),
+  date: date.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+  time: date.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+});
+
+const inferConnectionType = (req) => {
+  const ip = req.ip;
+  if (ip.startsWith('192.168.') || ip.startsWith('172.16.') || ip.startsWith('10.')) {
+    return 'Likely Mobile or Behind NAT';
+  }
+  return req.headers['cf-connecting-ip'] ? 'Behind Cloudflare' : 'Likely WiFi/Landline';
+};
+
+// API Data Fetching
+const fetchGeoData = async (ip) => {
+  const data = { freegeoip: null, ipgeolocation: null };
+  
+  try {
+    const freeGeoRes = await axios.get(`https://freegeoip.app/json/${ip}`);
+    data.freegeoip = {
+      location: `${freeGeoRes.data.city || 'Unknown'}, ${freeGeoRes.data.region_name || 'Unknown'}, ${freeGeoRes.data.country_name || 'Unknown'}`,
+      coords: { lat: freeGeoRes.data.latitude, lon: freeGeoRes.data.longitude },
+      isp: freeGeoRes.data.metro_code ? `Metro Code: ${freeGeoRes.data.metro_code}` : 'Unknown ISP',
+      timezone: freeGeoRes.data.time_zone || 'N/A'
+    };
+  } catch (err) {
+    console.warn('FreeGeoIP error:', err.message);
+  }
+
+  try {
+    const ipGeoRes = await axios.get(`https://api.ipgeolocation.io/ipgeo?apiKey=${API_KEYS.IPGEOLOCATION}&ip=${ip}`);
+    data.ipgeolocation = {
+      location: `${ipGeoRes.data.city || 'Unknown'}, ${ipGeoRes.data.state_prov || 'Unknown'}, ${ipGeoRes.data.country_name || 'Unknown'}`,
+      coords: { lat: ipGeoRes.data.latitude, lon: ipGeoRes.data.longitude },
+      isp: ipGeoRes.data.isp || 'Unknown ISP',
+      isProxy: ipGeoRes.data.is_proxy || false,
+      organization: ipGeoRes.data.organization || 'N/A'
+    };
+  } catch (err) {
+    console.warn('IPGeolocation error:', err.message);
+  }
+
+  return data;
+};
+
+const fetchThreatData = async (ip) => {
+  try {
+    const res = await axios.get(`https://api.abuseipdb.com/api/v2/check?ipAddress=${ip}`, {
+      headers: { 'Key': API_KEYS.ABUSEIPDB }
+    });
+    return {
+      isPublic: res.data.data.isPublic,
+      abuseConfidence: res.data.data.abuseConfidenceScore,
+      isTor: res.data.data.isTor,
+      isProxy: res.data.data.isProxy,
+      lastReported: res.data.data.lastReportedAt || 'Never'
+    };
+  } catch (err) {
+    console.warn('AbuseIPDB error:', err.message);
+    return null;
+  }
+};
+
+// Main route
 app.get('/', async (req, res) => {
   const ip = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
   const userAgent = req.headers['user-agent'] || '';
   const referrer = req.headers['referer'] || req.headers['referrer'] || 'direct';
 
-  // Skip tracking for uptime monitoring services
-  if (userAgent.includes('UptimeRobot') || userAgent.includes('pingbot')) {
+  // Skip bots
+  if (/UptimeRobot|pingbot|bot|spider|crawl/i.test(userAgent)) {
     return res.status(204).end();
   }
 
-  // Format timestamp
+  // Parse basic info
   const timestamp = new Date();
-  const day = timestamp.toLocaleString('en-US', { weekday: 'long' });
-  const date = timestamp.toLocaleString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  const time = timestamp.toLocaleString('en-US', { 
-    hour: '2-digit', 
-    minute: '2-digit', 
-    second: '2-digit', 
-    hour12: true 
-  });
-
-  // Parse user agent
+  const { day, date, time } = formatDate(timestamp);
   const parser = new UAParser(userAgent);
-  const device = parser.getDevice();
-  const os = parser.getOS();
-  const browser = parser.getBrowser();
-  const engine = parser.getEngine();
-  const cpu = parser.getCPU();
-  const deviceType = device.type || 'Unknown';
-
-  // Network information
-  const connectionType = inferConnectionType(req);
+  const { type: deviceType, vendor: deviceVendor, model: deviceModel } = parser.getDevice();
+  const { name: osName, version: osVersion } = parser.getOS();
+  const { name: browserName, version: browserVersion } = parser.getBrowser();
   const sessionStart = sessionStarts[ip];
-  const sessionDuration = sessionStart ? 
-    `${Math.round((new Date() - sessionStart) / 1000)} seconds` : 
-    'First visit';
+  const sessionDuration = sessionStart ? `${Math.round((new Date() - sessionStart) / 1000)}s` : 'First visit';
 
-  // --- Location Data Collection ---
-  let location_ipinfo = 'N/A';
-  let lat_ipinfo = null;
-  let lon_ipinfo = null;
-  let isp_ipinfo = 'N/A';
-  let asn = 'N/A', hostname = 'N/A', postal = 'N/A', timezone_ipinfo = 'N/A';
+  // Fetch enhanced data
+  const [geoData, threatData] = await Promise.all([
+    fetchGeoData(ip),
+    fetchThreatData(ip)
+  ]);
 
-  try {
-    const ipinfoToken = '5cbabbc7ad7b57'; // Consider using environment variable
-    const geo = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`);
-    const { city, region, country, org, loc, hostname: h, postal: p, timezone: tz, asn: asnObj } = geo.data;
+  // Determine best available location
+  const bestLocation = geoData.ipgeolocation?.location || geoData.freegeoip?.location || 'Unknown Location';
+  const bestCoords = geoData.ipgeolocation?.coords || geoData.freegeoip?.coords || { lat: null, lon: null };
+  const bestIsp = geoData.ipgeolocation?.isp || geoData.freegeoip?.isp || 'Unknown ISP';
 
-    location_ipinfo = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
-    isp_ipinfo = org || 'Unknown ISP';
-    hostname = h || 'N/A';
-    postal = p || 'N/A';
-    timezone_ipinfo = tz || 'N/A';
-    asn = asnObj?.asn || 'N/A';
-    
-    if (loc) {
-      const [latitude, longitude] = loc.split(',');
-      lat_ipinfo = latitude;
-      lon_ipinfo = longitude;
-    }
-  } catch (err) {
-    console.warn('IPInfo failed:', err.message);
-  }
-
-  // Additional info
-  const agent = useragent.parse(userAgent);
-  const clientIp = requestIp.getClientIp(req);
-  const languages = req.headers['accept-language'] || 'Unknown';
-  const dnt = req.headers['dnt'] === '1' ? 'Yes' : 'No';
-  const forwardedFor = req.headers['x-forwarded-for'] || 'N/A';
-  const realIp = req.headers['x-real-ip'] || 'N/A';
-  const platform = os.name || 'Unknown';
-  const browserFamily = agent.family || 'Unknown';
-  const browserVersion = agent.toVersion() || 'Unknown';
-  const osFamily = agent.os.family || 'Unknown';
-  const osVersion = agent.os.toVersion() || 'Unknown';
-  const deviceFamily = agent.device.family || 'Unknown';
-
-  // Compose email
+  // Prepare email
   const mailOptions = {
     from: 'Website Tracker <staysane.rz@gmail.com>',
     to: 'xraymundzyron@gmail.com',
-    subject: `New Visitor from ${location_ipinfo.split(',')[0] || 'Unknown Location'}`,
-    html: `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>New Visitor Notification</title>
-  <style>
-    body {
-      background: #f7f7f7;
-      margin: 0;
-      padding: 0;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      color: #222;
-    }
-    .card {
-      background: #fff;
-      border-radius: 10px;
-      max-width: 98vw;
-      margin: 18px auto;
-      padding: 20px 5vw 18px 5vw;
-      box-shadow: 0 2px 8px rgba(44,62,80,0.08);
-    }
-    h1 {
-      font-size: 1.3em;
-      color: #3498db;
-      margin: 0 0 18px 0;
-      text-align: center;
-    }
-    .section {
-      margin-bottom: 18px;
-    }
-    .label {
-      color: #888;
-      font-size: 1em;
-      font-weight: 600;
-      display: block;
-      margin-bottom: 2px;
-    }
-    .value {
-      font-size: 1.08em;
-      margin-bottom: 10px;
-      word-break: break-all;
-    }
-    .map-link {
-      display: inline-block;
-      background: #3498db;
-      color: #fff;
-      padding: 8px 16px;
-      border-radius: 4px;
-      text-decoration: none;
-      font-size: 1em;
-      margin-top: 8px;
-    }
-    .footer {
-      text-align: center;
-      color: #aaa;
-      font-size: 0.95em;
-      margin-top: 24px;
-    }
-    @media (max-width: 480px) {
-      .card { padding: 12px 2vw; }
-      h1 { font-size: 1.1em; }
-      .value, .label { font-size: 1em; }
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>🚀 New Website Visit Detected</h1>
-    <div class="section">
-      <span class="label">Day</span>
-      <div class="value">${day}</div>
-      <span class="label">Date</span>
-      <div class="value">${date}</div>
-      <span class="label">Time</span>
-      <div class="value">${time}</div>
-    </div>
-    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
-    <div class="section">
-      <span class="label">IP Address</span>
-      <div class="value">${ip}</div>
-      <span class="label">Client IP</span>
-      <div class="value">${clientIp}</div>
-      <span class="label">Forwarded For</span>
-      <div class="value">${forwardedFor}</div>
-      <span class="label">Real IP</span>
-      <div class="value">${realIp}</div>
-      <span class="label">Connection</span>
-      <div class="value">${connectionType}</div>
-      <span class="label">ISP</span>
-      <div class="value">${isp_ipinfo}</div>
-      <span class="label">ASN</span>
-      <div class="value">${asn}</div>
-      <span class="label">Hostname</span>
-      <div class="value">${hostname}</div>
-      <span class="label">Postal</span>
-      <div class="value">${postal}</div>
-      <span class="label">Timezone</span>
-      <div class="value">${timezone_ipinfo}</div>
-    </div>
-    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
-    <div class="section">
-      <span class="label">Location</span>
-      <div class="value">${location_ipinfo}</div>
-      <span class="label">Coordinates</span>
-      <div class="value">${lat_ipinfo || 'N/A'}, ${lon_ipinfo || 'N/A'}</div>
-      ${lat_ipinfo && lon_ipinfo ? `<a href="https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}" class="map-link">View on Google Maps</a>` : ''}
-    </div>
-    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
-    <div class="section">
-      <span class="label">Device Type</span>
-      <div class="value">${deviceType}</div>
-      <span class="label">Brand</span>
-      <div class="value">${device.vendor || 'Unknown'}</div>
-      <span class="label">Model</span>
-      <div class="value">${device.model || 'Unknown'}</div>
-      <span class="label">OS</span>
-      <div class="value">${os.name || 'OS'} ${os.version || ''}</div>
-      <span class="label">Browser</span>
-      <div class="value">${browser.name || 'Browser'} ${browser.version || ''}</div>
-      <span class="label">Engine</span>
-      <div class="value">${engine.name || 'Unknown engine'}</div>
-      <span class="label">CPU</span>
-      <div class="value">${cpu.architecture || 'Unknown CPU architecture'}</div>
-      <span class="label">UserAgent (parsed)</span>
-      <div class="value">${agent.toString()}</div>
-      <span class="label">UserAgent Family</span>
-      <div class="value">${browserFamily} ${browserVersion}</div>
-      <span class="label">OS Family</span>
-      <div class="value">${osFamily} ${osVersion}</div>
-      <span class="label">Device Family</span>
-      <div class="value">${deviceFamily}</div>
-      <span class="label">Platform</span>
-      <div class="value">${platform}</div>
-      <span class="label">DNT</span>
-      <div class="value">${dnt}</div>
-      <span class="label">Languages</span>
-      <div class="value">${languages}</div>
-    </div>
-    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
-    <div class="section">
-      <span class="label">Session Duration</span>
-      <div class="value">${sessionDuration}</div>
-      <span class="label">Referrer</span>
-      <div class="value">${referrer}</div>
-      <span class="label">User Agent</span>
-      <div class="value">${userAgent}</div>
-    </div>
-    <div class="footer" style="background:#f0f4f8;padding:12px 0;border-radius:0 0 10px 10px;margin-top:24px;">
-      <span style="font-size:1em;color:#3498db;font-weight:600;">Visitor log generated: ${date} ${time}</span>
-    </div>
-  </div>
-</body>
-</html>`
+    subject: `New Visitor: ${bestLocation.split(',')[0]}`,
+    html: buildEmailTemplate({
+      timestamp: { day, date, time },
+      ipInfo: {
+        address: ip,
+        connection: inferConnectionType(req),
+        isp: bestIsp,
+        location: bestLocation,
+        coords: bestCoords,
+        timezone: geoData.freegeoip?.timezone
+      },
+      deviceInfo: {
+        type: deviceType || 'Unknown',
+        vendor: deviceVendor || 'Unknown',
+        model: deviceModel || 'Unknown',
+        os: `${osName || 'OS'} ${osVersion || ''}`,
+        browser: `${browserName || 'Browser'} ${browserVersion || ''}`
+      },
+      sessionInfo: {
+        duration: sessionDuration,
+        referrer: referrer,
+        userAgent: userAgent
+      },
+      threatInfo: threatData || {
+        isPublic: 'N/A',
+        abuseConfidence: 'N/A',
+        isTor: 'N/A',
+        isProxy: 'N/A',
+        lastReported: 'N/A'
+      }
+    })
   };
 
-  // Send email (fire and forget)
-  transporter.sendMail(mailOptions, (error, info) => {
-    if (error) {
-      console.error('Email failed:', error);
-    } else {
-      console.log('Email sent:', info.messageId);
-    }
-  });
+  // Send email (async)
+  transporter.sendMail(mailOptions)
+    .then(info => console.log('Email sent:', info.messageId))
+    .catch(err => console.error('Email failed:', err));
 
-  // Serve the actual website
+  // Serve website
   res.sendFile(__dirname + '/index.html');
 });
 
-// Helper function to guess connection type
-function inferConnectionType(req) {
-  const ip = req.ip;
-  
-  // Private IP ranges often indicate mobile or NAT
-  if (ip.startsWith('192.168.') || 
-      ip.startsWith('172.16.') || 
-      ip.startsWith('10.')) {
-    return 'Likely Mobile (Cellular) or Behind NAT';
-  }
-  
-  // Cloudflare headers can provide more info
-  if (req.headers['cf-connecting-ip']) {
-    return 'Behind Cloudflare (possibly any connection)';
-  }
-  
-  return 'Likely WiFi/Landline';
-}
+// Email template builder
+const buildEmailTemplate = (data) => {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+    .header { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+    .section { margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-radius: 5px; }
+    .label { font-weight: bold; color: #3498db; }
+    .threat-high { color: #e74c3c; font-weight: bold; }
+    .threat-medium { color: #f39c12; font-weight: bold; }
+    .threat-low { color: #2ecc71; font-weight: bold; }
+    .map-link { color: #3498db; text-decoration: none; }
+    .map-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🚀 New Website Visitor</h1>
+    <p>${data.timestamp.day}, ${data.timestamp.date} at ${data.timestamp.time}</p>
+  </div>
 
-// Error handling middleware
+  <div class="section">
+    <h2>📍 Location Information</h2>
+    <p><span class="label">IP Address:</span> ${data.ipInfo.address}</p>
+    <p><span class="label">Location:</span> ${data.ipInfo.location}</p>
+    <p><span class="label">Coordinates:</span> ${data.ipInfo.coords.lat || 'N/A'}, ${data.ipInfo.coords.lon || 'N/A'}</p>
+    ${data.ipInfo.coords.lat ? `<a href="https://maps.google.com?q=${data.ipInfo.coords.lat},${data.ipInfo.coords.lon}" class="map-link">View on Google Maps</a>` : ''}
+    <p><span class="label">ISP:</span> ${data.ipInfo.isp}</p>
+    <p><span class="label">Timezone:</span> ${data.ipInfo.timezone || 'N/A'}</p>
+    <p><span class="label">Connection Type:</span> ${data.ipInfo.connection}</p>
+  </div>
+
+  <div class="section">
+    <h2>📱 Device Information</h2>
+    <p><span class="label">Device Type:</span> ${data.deviceInfo.type}</p>
+    <p><span class="label">Vendor/Model:</span> ${data.deviceInfo.vendor} ${data.deviceInfo.model}</p>
+    <p><span class="label">Operating System:</span> ${data.deviceInfo.os}</p>
+    <p><span class="label">Browser:</span> ${data.deviceInfo.browser}</p>
+  </div>
+
+  <div class="section">
+    <h2>⚠️ Threat Analysis</h2>
+    <p><span class="label">Public IP:</span> ${data.threatInfo.isPublic}</p>
+    <p><span class="label">Abuse Confidence:</span> 
+      <span class="${
+        data.threatInfo.abuseConfidence > 70 ? 'threat-high' : 
+        data.threatInfo.abuseConfidence > 30 ? 'threat-medium' : 'threat-low'
+      }">
+        ${data.threatInfo.abuseConfidence}%
+      </span>
+    </p>
+    <p><span class="label">Tor Network:</span> ${data.threatInfo.isTor}</p>
+    <p><span class="label">Proxy/VPN:</span> ${data.threatInfo.isProxy}</p>
+    <p><span class="label">Last Reported:</span> ${data.threatInfo.lastReported}</p>
+  </div>
+
+  <div class="section">
+    <h2>📊 Session Information</h2>
+    <p><span class="label">Session Duration:</span> ${data.sessionInfo.duration}</p>
+    <p><span class="label">Referrer:</span> ${data.sessionInfo.referrer}</p>
+    <p><span class="label">User Agent:</span> ${data.sessionInfo.userAgent}</p>
+  </div>
+
+  <footer style="margin-top: 20px; text-align: center; color: #7f8c8d; font-size: 0.9em;">
+    <p>This notification was generated automatically</p>
+    <p>${new Date().toLocaleString()}</p>
+  </footer>
+</body>
+</html>`;
+};
+
+// Error handling
 app.use((err, req, res, next) => {
   console.error('Error:', err.stack);
   
-  // Send error notification email
-  const errorMailOptions = {
+  const errorMail = {
     from: 'Website Tracker Error <staysane.rz@gmail.com>',
     to: 'xraymundzyron@gmail.com',
     subject: 'Tracker Error Occurred',
-    text: `An error occurred in your website tracker:
-    
-Error: ${err.message}
-Stack: ${err.stack}
-
-Request Info:
-IP: ${req.ip}
-URL: ${req.originalUrl}
-User Agent: ${req.headers['user-agent']}`
+    text: `Error: ${err.message}\n\nStack: ${err.stack}\n\nRequest Info:\nIP: ${req.ip}\nURL: ${req.originalUrl}\nUser Agent: ${req.headers['user-agent']}`
   };
   
-  transporter.sendMail(errorMailOptions);
-  
+  transporter.sendMail(errorMail);
   res.status(500).send('Internal Server Error');
 });
 
