@@ -19,6 +19,15 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Verify transporter connection
+transporter.verify(function(error, success) {
+  if (error) {
+    console.error('Error verifying transporter:', error);
+  } else {
+    console.log('Server is ready to send emails');
+  }
+});
+
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(__dirname)); // Serve files from root directory
@@ -190,10 +199,16 @@ app.get('/', async (req, res) => {
       html: `<pre style="font-family: monospace; font-size: 12px; line-height: 1.4;">${generateEmailHtml(timestamp, geoData, ip, timezone, deviceType, device, screenResolution, colorInfo, os, browser, engine, cpu, isBot, fingerprintData, connectionType, dnt, cookiesEnabled, languagePrefs, referrer, sessionDuration, pageViews, sessionData, userAgent)}</pre>`
     };
 
-    // Send email (non-blocking)
-    transporter.sendMail(mailOptions).catch(error => {
+    // Send email with error handling
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log('Email sent successfully');
+    } catch (error) {
       console.error('Email failed:', error);
-    });
+      if (error.response) {
+        console.error('SMTP server response:', error.response);
+      }
+    }
 
     // Serve the index.html file directly from root
     res.sendFile(__dirname + '/index.html');
