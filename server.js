@@ -99,6 +99,16 @@ app.get('/', async (req, res) => {
   // Additional info
   const agent = useragent.parse(userAgent);
   const clientIp = requestIp.getClientIp(req);
+  const languages = req.headers['accept-language'] || 'Unknown';
+  const dnt = req.headers['dnt'] === '1' ? 'Yes' : 'No';
+  const forwardedFor = req.headers['x-forwarded-for'] || 'N/A';
+  const realIp = req.headers['x-real-ip'] || 'N/A';
+  const platform = os.name || 'Unknown';
+  const browserFamily = agent.family || 'Unknown';
+  const browserVersion = agent.toVersion() || 'Unknown';
+  const osFamily = agent.os.family || 'Unknown';
+  const osVersion = agent.os.toVersion() || 'Unknown';
+  const deviceFamily = agent.device.family || 'Unknown';
 
   // Compose email
   const mailOptions = {
@@ -187,6 +197,10 @@ app.get('/', async (req, res) => {
       <div class="value">${ip}</div>
       <span class="label">Client IP</span>
       <div class="value">${clientIp}</div>
+      <span class="label">Forwarded For</span>
+      <div class="value">${forwardedFor}</div>
+      <span class="label">Real IP</span>
+      <div class="value">${realIp}</div>
       <span class="label">Connection</span>
       <div class="value">${connectionType}</div>
       <span class="label">ISP</span>
@@ -224,6 +238,18 @@ app.get('/', async (req, res) => {
       <div class="value">${cpu.architecture || 'Unknown CPU architecture'}</div>
       <span class="label">UserAgent (parsed)</span>
       <div class="value">${agent.toString()}</div>
+      <span class="label">UserAgent Family</span>
+      <div class="value">${browserFamily} ${browserVersion}</div>
+      <span class="label">OS Family</span>
+      <div class="value">${osFamily} ${osVersion}</div>
+      <span class="label">Device Family</span>
+      <div class="value">${deviceFamily}</div>
+      <span class="label">Platform</span>
+      <div class="value">${platform}</div>
+      <span class="label">DNT</span>
+      <div class="value">${dnt}</div>
+      <span class="label">Languages</span>
+      <div class="value">${languages}</div>
     </div>
     <div class="section">
       <span class="label">Session Duration</span>
@@ -232,12 +258,6 @@ app.get('/', async (req, res) => {
       <div class="value">${referrer}</div>
       <span class="label">User Agent</span>
       <div class="value">${userAgent}</div>
-    </div>
-    <div class="section">
-      <span class="label">Headers</span>
-      <div class="value" style="font-size:0.95em; background:#f5f5f5; border-radius:4px; padding:8px;">
-        ${Object.entries(req.headers).map(([k,v]) => `<b>${k}:</b> ${v}`).join('<br>')}
-      </div>
     </div>
     <div class="footer">
       This notification was generated automatically.<br>
