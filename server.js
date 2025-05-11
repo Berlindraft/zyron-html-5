@@ -3,101 +3,144 @@ const nodemailer = require('nodemailer');
 const axios = require('axios');
 const UAParser = require('ua-parser-js');
 const geoip = require('geoip-lite');
-const path = require('path');
 const app = express();
 
 // Configuration
 app.set('trust proxy', true);
 const sessionStarts = {};
 
-// Email transporter setup with environment variables
-const transporter = nodemailer.createTransport({
+// Email Configuration
+const emailConfig = {
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER || 'staysane.rz@gmail.com',
-    pass: process.env.EMAIL_PASS || 'nvkq cudo ibhh usdr',
+    user: 'staysane.rz@gmail.com',
+    pass: 'nvkq cudo ibhh usdr',
   },
-});
+  tls: {
+    rejectUnauthorized: false // For development only, remove in production
+  }
+};
 
-// Verify transporter connection
-transporter.verify(function(error, success) {
+// Create transporter with connection pooling
+const transporter = nodemailer.createTransport(emailConfig);
+
+// Verify transporter connection on startup
+transporter.verify((error) => {
   if (error) {
-    console.error('Error verifying transporter:', error);
+    console.error('SMTP Connection Error:', error);
   } else {
-    console.log('Server is ready to send emails');
+    console.log('SMTP Server is ready to send emails');
   }
 });
 
 // Middleware
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(__dirname)); // Serve files from root directory
-
-// Session tracking middleware
+app.use(express.static(__dirname));
 app.use((req, res, next) => {
   const ip = req.ip;
   if (!sessionStarts[ip]) {
     sessionStarts[ip] = {
-      startTime: Date.now(),
-      pageViews: 0,
-      fingerprint: req.query.fp || 'unknown'
+      startTime: new Date(),
+      pageViews: 0
     };
   }
   sessionStarts[ip].pageViews++;
   next();
 });
 
-// Fixed timestamp formatting with Philippine timezone
+// Helper Functions
 function formatTimestamp() {
-  const options = {
-    timeZone: 'Asia/Manila',
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  };
-
   const now = new Date();
-  const phTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
-  
   return {
+    date: now.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric',
+      timeZone: 'Asia/Manila'
+    }),
+    time: now.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Manila'
+    }),
+    day: now.toLocaleDateString('en-US', { 
+      weekday: 'long',
+      timeZone: 'Asia/Manila'
+    }),
     iso: now.toISOString(),
-    utc: now.toUTCString(),
-    local: now.toLocaleString('en-US', options),
-    phTime: phTime.toLocaleString('en-US', options),
-    timezone: 'Asia/Manila (Philippine Time)',
-    timezoneOffset: 'UTC+8',
-    unix: Math.floor(now.getTime() / 1000),
-    precise: Number(process.hrtime.bigint() / 1000000n)
+    unix: Math.floor(now.getTime() / 1000)
   };
 }
 
 function inferConnectionType(req) {
-  const headers = req.headers;
   const ip = req.ip;
+  const headers = req.headers;
   
+  // Check for Cloudflare
   if (headers['cf-connecting-ip']) {
-    const cfRay = headers['cf-ray'] || '';
-    const colo = cfRay.split('-')[1] || 'unknown';
+    const colo = headers['cf-ray']?.split('-')[1] || 'unknown';
     return `Cloudflare (${colo.toUpperCase()})`;
   }
-  
+
+  // Check for proxy headers
   const proxyHeaders = ['x-forwarded-for', 'via', 'client-ip', 'forwarded'];
   if (proxyHeaders.some(h => headers[h])) {
     return 'Behind Proxy/Load Balancer';
   }
-  
+
+  // Check for private IPs
   if (ip.startsWith('192.') || ip.startsWith('172.16.') || ip.startsWith('10.')) {
     return 'Likely Mobile (Cellular)';
   }
-  
+
+  // Check for Tor
   if (headers['x-tor-ip'] || (headers.host && headers.host.endsWith('.onion'))) {
     return 'Tor Network';
   }
-  
+
   return 'Likely WiFi/Landline';
+}
+
+async function getGeoData(ip) {
+  const geoData = {
+    ipinfo: 'N/A',
+    geoip: 'N/A',
+    combined: 'N/A',
+    coords: null,
+    isp: 'Unknown',
+    asn: 'Unknown'
+  };
+
+  try {
+    // Try ipinfo.io first
+    const ipinfoToken = '5cbabbc7ad7b57';
+    const ipinfoResponse = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`);
+    const { city, region, country, org, loc, asn } = ipinfoResponse.data;
+
+    geoData.ipinfo = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
+    geoData.isp = org || 'Unknown';
+    geoData.asn = asn?.asn || 'Unknown';
+    
+    if (loc) {
+      geoData.coords = loc.split(',');
+    }
+
+    // Fallback to geoip-lite
+    const geoipLookup = geoip.lookup(ip);
+    if (geoipLookup) {
+      geoData.geoip = `${geoipLookup.city || 'Unknown'}, ${geoipLookup.region || 'Unknown'}, ${geoipLookup.country || 'Unknown'}`;
+      if (!geoData.coords) {
+        geoData.coords = [geoipLookup.ll[0], geoipLookup.ll[1]];
+      }
+    }
+
+    geoData.combined = geoData.ipinfo !== 'N/A' ? geoData.ipinfo : geoData.geoip;
+  } catch (err) {
+    console.warn('Geo lookup failed:', err.message);
+  }
+
+  return geoData;
 }
 
 // Routes
@@ -108,19 +151,13 @@ app.get('/', async (req, res) => {
     const referrer = req.headers['referer'] || req.headers['referrer'] || 'direct';
     const acceptLanguage = req.headers['accept-language'] || 'Unknown';
     const dnt = req.headers['dnt'] === '1' ? 'Yes' : 'No';
-    const screenWidth = req.query.width || 'Unknown';
-    const screenHeight = req.query.height || 'Unknown';
-    const colorDepth = req.query.color || 'Unknown';
-    const timezone = req.query.tz || 'Unknown';
-    const cookiesEnabled = req.query.cookies === '1' ? 'Enabled' : req.query.cookies === '0' ? 'Disabled' : 'Unknown';
-    const fingerprint = req.query.fp ? Buffer.from(req.query.fp, 'base64').toString('utf8') : null;
 
-    const timestamp = formatTimestamp();
-
-    if (userAgent.includes('UptimeRobot')) {
+    // Skip bots and monitoring services
+    if (userAgent.includes('UptimeRobot') || /bot|crawl|spider/i.test(userAgent)) {
       return res.status(204).end();
     }
 
+    // Parse user agent
     const parser = new UAParser(userAgent);
     const device = parser.getDevice();
     const os = parser.getOS();
@@ -129,211 +166,134 @@ app.get('/', async (req, res) => {
     const cpu = parser.getCPU();
     const deviceType = device.type || 'desktop';
 
-    const connectionType = inferConnectionType(req);
+    // Session data
     const sessionData = sessionStarts[ip];
-    const sessionDuration = sessionData ?
-      `${((Date.now() - sessionData.startTime) / 1000).toFixed(2)} seconds` :
+    const sessionDuration = sessionData ? 
+      `${((Date.now() - sessionData.startTime) / 1000).toFixed(2)} seconds` : 
       'First visit';
     const pageViews = sessionData ? sessionData.pageViews : 1;
 
-    // Geo lookup
-    let geoData = {
-      ipinfo: 'N/A',
-      geoip: 'N/A',
-      combined: 'N/A',
-      coords: null,
-      isp: 'Unknown',
-      asn: 'Unknown',
-      proxy: 'No'
-    };
+    // Get geo data
+    const geoData = await getGeoData(ip);
+    const timestamp = formatTimestamp();
+    const connectionType = inferConnectionType(req);
 
-    try {
-      const ipinfoToken = process.env.IPINFO_TOKEN || '5cbabbc7ad7b57';
-      const ipinfoResponse = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`);
-      const { city, region, country, org, loc, hostname, postal, timezone: ipTimezone, asn: ipAsn } = ipinfoResponse.data;
-
-      geoData.ipinfo = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
-      geoData.isp = org || 'Unknown';
-      geoData.asn = ipAsn?.asn || 'Unknown';
-      
-      if (hostname) geoData.ipinfo += ` (Hostname: ${hostname})`;
-      if (postal) geoData.ipinfo += ` (Postal: ${postal})`;
-      if (loc) geoData.coords = loc.split(',');
-
-      const geoipLookup = geoip.lookup(ip);
-      if (geoipLookup) {
-        geoData.geoip = `${geoipLookup.city || 'Unknown'}, ${geoipLookup.region || 'Unknown'}, ${geoipLookup.country || 'Unknown'}`;
-        if (!geoData.coords) geoData.coords = [geoipLookup.ll[0], geoipLookup.ll[1]];
-      }
-
-      geoData.combined = geoData.ipinfo !== 'N/A' ? geoData.ipinfo : geoData.geoip;
-
-      const proxyHeaders = ['via', 'x-forwarded-for', 'client-ip', 'forwarded'];
-      geoData.proxy = proxyHeaders.some(h => req.headers[h]) ? 'Yes (Proxy headers detected)' : 'No';
-      if (ip !== req.connection.remoteAddress) geoData.proxy = 'Yes (IP mismatch)';
-    } catch (err) {
-      console.warn('Geo lookup failed:', err.message);
-    }
-
-    // Device detection
-    const isMobile = deviceType === 'mobile' || deviceType === 'tablet';
-    const isBot = /bot|crawl|spider|slurp|baidu/i.test(userAgent) ? 'Yes' : 'No';
-    const screenResolution = `${screenWidth} × ${screenHeight}`;
-    const colorInfo = `${colorDepth}-bit color depth`;
-    const languagePrefs = acceptLanguage.split(',').map(lang => lang.split(';')[0]).join(', ');
-
-    // Parse fingerprint data
-    let fingerprintData = null;
-    try {
-      if (fingerprint) fingerprintData = JSON.parse(fingerprint);
-    } catch (e) {
-      console.warn('Fingerprint parse error:', e.message);
-    }
-
-    // Email content
+    // Prepare email
     const mailOptions = {
-      from: process.env.EMAIL_USER || 'staysane.rz@gmail.com',
-      to: process.env.RECIPIENT_EMAIL || 'xraymundzyron@gmail.com',
-      subject: `🚀 ${isMobile ? '📱 Mobile' : '💻 Desktop'} Visitor - ${ip.substring(0, 15)}...`,
-      text: `New visit detected!\n\n${generateEmailText(timestamp, geoData, ip, timezone, deviceType, device, screenResolution, colorInfo, os, browser, engine, cpu, isBot, fingerprintData, connectionType, dnt, cookiesEnabled, languagePrefs, referrer, sessionDuration, pageViews, sessionData, userAgent)}`,
-      html: `<pre style="font-family: monospace; font-size: 12px; line-height: 1.4;">${generateEmailHtml(timestamp, geoData, ip, timezone, deviceType, device, screenResolution, colorInfo, os, browser, engine, cpu, isBot, fingerprintData, connectionType, dnt, cookiesEnabled, languagePrefs, referrer, sessionDuration, pageViews, sessionData, userAgent)}</pre>`
+      from: '"Website Tracker" <staysane.rz@gmail.com>',
+      to: 'xraymundzyron@gmail.com',
+      subject: `🚀 ${deviceType === 'mobile' ? '📱 Mobile' : '💻 Desktop'} Visitor - ${ip.substring(0, 15)}...`,
+      text: generateEmailText(timestamp, geoData, ip, deviceType, device, os, browser, engine, cpu, connectionType, dnt, referrer, sessionDuration, pageViews, userAgent),
+      html: generateEmailHtml(timestamp, geoData, ip, deviceType, device, os, browser, engine, cpu, connectionType, dnt, referrer, sessionDuration, pageViews, userAgent)
     };
 
-    // Send email with error handling
+    // Send email with retry logic
     try {
       await transporter.sendMail(mailOptions);
-      console.log('Email sent successfully');
+      console.log(`Email sent for IP: ${ip}`);
     } catch (error) {
       console.error('Email failed:', error);
-      if (error.response) {
-        console.error('SMTP server response:', error.response);
-      }
+      // Implement retry logic here if needed
     }
 
-    // Serve the index.html file directly from root
+    // Serve the response
     res.sendFile(__dirname + '/index.html');
 
   } catch (error) {
-    console.error('Error processing request:', error);
+    console.error('Request processing error:', error);
     res.status(500).send('Internal Server Error');
   }
 });
 
-app.get('/track', (req, res) => {
-  res.status(204).end();
-});
-
 // Email content generators
-function generateEmailText(timestamp, geoData, ip, timezone, deviceType, device, screenResolution, colorInfo, os, browser, engine, cpu, isBot, fingerprintData, connectionType, dnt, cookiesEnabled, languagePrefs, referrer, sessionDuration, pageViews, sessionData, userAgent) {
+function generateEmailText(timestamp, geoData, ip, deviceType, device, os, browser, engine, cpu, connectionType, dnt, referrer, sessionDuration, pageViews, userAgent) {
   return `
-=== 🌍 TIMING & LOCATION ===
-🕒 UTC Time:     ${timestamp.utc}
-🕒 PH Time:      ${timestamp.phTime} (${timestamp.timezone})
-🕒 ISO-8601:     ${timestamp.iso}
-🕒 Unix Time:    ${timestamp.unix}
-🕒 Precise:      ${timestamp.precise} ms
-🌐 Timezone:     ${timestamp.timezone}
+=== 🌍 VISITOR DETAILS ===
+🕒 Date: ${timestamp.day}, ${timestamp.date}
+🕒 Time: ${timestamp.time} (PH Time)
+🕒 Unix: ${timestamp.unix}
 
-📍 IP Address:   ${ip}
-📍 Location:     ${geoData.combined}
-📍 Coordinates:  ${geoData.coords ? geoData.coords.join(', ') : 'N/A'}
-📍 Map:          https://www.google.com/maps?q=${geoData.coords ? geoData.coords.join(',') : ''}
-📡 ISP:          ${geoData.isp}
-📡 ASN:          ${geoData.asn}
-🛡️ Proxy/VPN:    ${geoData.proxy}
+📍 IP: ${ip}
+📍 Location: ${geoData.combined}
+📍 Coordinates: ${geoData.coords ? geoData.coords.join(', ') : 'N/A'}
+📍 Map: https://www.google.com/maps?q=${geoData.coords ? geoData.coords.join(',') : ''}
+📡 ISP: ${geoData.isp}
+📡 ASN: ${geoData.asn}
 
 === 💻 DEVICE INFO ===
-📱 Type:         ${deviceType}
-🏷️ Brand:        ${device.vendor || 'Unknown'}
-🖥️ Model:        ${device.model || 'Unknown'}
-🖥️ Screen:       ${screenResolution} (${colorInfo})
-💾 OS:           ${os.name || 'OS'} ${os.version || ''}
-🌐 Browser:      ${browser.name || 'Browser'} ${browser.version || ''}
-⚙️ Engine:       ${engine.name || 'Unknown engine'}
-🧠 CPU:          ${cpu.architecture || 'Unknown CPU architecture'}
-🤖 Bot:          ${isBot}
+📱 Type: ${deviceType}
+🏷️ Brand: ${device.vendor || 'Unknown'}
+🖥️ Model: ${device.model || 'Unknown'}
+💾 OS: ${os.name || 'OS'} ${os.version || ''}
+🌐 Browser: ${browser.name || 'Browser'} ${browser.version || ''}
+⚙️ Engine: ${engine.name || 'Unknown engine'}
+🧠 CPU: ${cpu.architecture || 'Unknown CPU architecture'}
 
-=== 🔍 FINGERPRINT ===
-🖌️ Canvas:       ${fingerprintData?.canvas ? 'Present' : 'No'}
-🎮 WebGL:        ${fingerprintData?.webgl ? (typeof fingerprintData.webgl === 'string' ? fingerprintData.webgl : 'Vendor: ' + fingerprintData.webgl.vendor) : 'No'}
-🎧 Audio:        ${fingerprintData?.audio ? fingerprintData.audio + ' chars' : 'No'}
-🧩 Plugins:      ${fingerprintData?.plugins ? fingerprintData.plugins.split('|').length + ' plugins' : 'No'}
-✒️ Fonts:        ${fingerprintData?.fonts ? fingerprintData.fonts.split(',').length + ' fonts' : 'No'}
-👆 Touch:        ${fingerprintData?.touch ? 'Supported' : 'No'}
-⚙️ Hardware:     ${fingerprintData?.hardware ? `${fingerprintData.hardware.cores} cores, ${fingerprintData.hardware.memory}GB RAM` : 'No'}
-
-=== 🔗 NETWORK & PRIVACY ===
-📶 Connection:   ${connectionType}
-🚫 DNT Header:   ${dnt} (Do Not Track)
-🍪 Cookies:      ${cookiesEnabled}
-🗣️ Languages:    ${languagePrefs}
-🔗 Referrer:     ${referrer}
+=== 🔗 NETWORK ===
+📶 Connection: ${connectionType}
+🚫 DNT Header: ${dnt}
+🔗 Referrer: ${referrer}
 
 === 📊 SESSION ===
-⏱️ Duration:     ${sessionDuration}
-📊 Page Views:   ${pageViews}
-👾 Fingerprint:  ${sessionData?.fingerprint || 'unknown'}
+⏱️ Duration: ${sessionDuration}
+📊 Page Views: ${pageViews}
 
 === 🕵️ USER AGENT ===
 ${userAgent}
 `;
 }
 
-function generateEmailHtml(timestamp, geoData, ip, timezone, deviceType, device, screenResolution, colorInfo, os, browser, engine, cpu, isBot, fingerprintData, connectionType, dnt, cookiesEnabled, languagePrefs, referrer, sessionDuration, pageViews, sessionData, userAgent) {
+function generateEmailHtml(timestamp, geoData, ip, deviceType, device, os, browser, engine, cpu, connectionType, dnt, referrer, sessionDuration, pageViews, userAgent) {
   return `
-<b>=== 🌍 TIMING & LOCATION ===</b>
-🕒 <b>UTC Time:</b>     ${timestamp.utc}
-🕒 <b>PH Time:</b>      ${timestamp.phTime} <i>(${timestamp.timezone})</i>
-🕒 <b>ISO-8601:</b>     ${timestamp.iso}
-🕒 <b>Unix Time:</b>    ${timestamp.unix}
-🕒 <b>Precise:</b>      ${timestamp.precise} ms
-🌐 <b>Timezone:</b>     ${timestamp.timezone}
+<div style="font-family: monospace; font-size: 14px; line-height: 1.5;">
+  <h2 style="color: #2563eb;">=== 🌍 VISITOR DETAILS ===</h2>
+  <p>🕒 <b>Date:</b> ${timestamp.day}, ${timestamp.date}</p>
+  <p>🕒 <b>Time:</b> ${timestamp.time} <i>(PH Time)</i></p>
+  <p>🕒 <b>Unix:</b> ${timestamp.unix}</p>
 
-📍 <b>IP Address:</b>   ${ip}
-📍 <b>Location:</b>     ${geoData.combined}
-📍 <b>Coordinates:</b>  ${geoData.coords ? geoData.coords.join(', ') : 'N/A'}
-📍 <b>Map:</b>          <a href="https://www.google.com/maps?q=${geoData.coords ? geoData.coords.join(',') : ''}">Google Maps</a>
-📡 <b>ISP:</b>          ${geoData.isp}
-📡 <b>ASN:</b>          ${geoData.asn}
-🛡️ <b>Proxy/VPN:</b>    ${geoData.proxy}
+  <p>📍 <b>IP:</b> ${ip}</p>
+  <p>📍 <b>Location:</b> ${geoData.combined}</p>
+  <p>📍 <b>Coordinates:</b> ${geoData.coords ? geoData.coords.join(', ') : 'N/A'}</p>
+  <p>📍 <b>Map:</b> <a href="https://www.google.com/maps?q=${geoData.coords ? geoData.coords.join(',') : ''}">View on Google Maps</a></p>
+  <p>📡 <b>ISP:</b> ${geoData.isp}</p>
+  <p>📡 <b>ASN:</b> ${geoData.asn}</p>
 
-<b>=== 💻 DEVICE INFO ===</b>
-📱 <b>Type:</b>         ${deviceType}
-🏷️ <b>Brand:</b>        ${device.vendor || 'Unknown'}
-🖥️ <b>Model:</b>        ${device.model || 'Unknown'}
-🖥️ <b>Screen:</b>       ${screenResolution} (${colorInfo})
-💾 <b>OS:</b>           ${os.name || 'OS'} ${os.version || ''}
-🌐 <b>Browser:</b>      ${browser.name || 'Browser'} ${browser.version || ''}
-⚙️ <b>Engine:</b>       ${engine.name || 'Unknown engine'}
-🧠 <b>CPU:</b>          ${cpu.architecture || 'Unknown CPU architecture'}
-🤖 <b>Bot:</b>          ${isBot}
+  <h2 style="color: #2563eb;">=== 💻 DEVICE INFO ===</h2>
+  <p>📱 <b>Type:</b> ${deviceType}</p>
+  <p>🏷️ <b>Brand:</b> ${device.vendor || 'Unknown'}</p>
+  <p>🖥️ <b>Model:</b> ${device.model || 'Unknown'}</p>
+  <p>💾 <b>OS:</b> ${os.name || 'OS'} ${os.version || ''}</p>
+  <p>🌐 <b>Browser:</b> ${browser.name || 'Browser'} ${browser.version || ''}</p>
+  <p>⚙️ <b>Engine:</b> ${engine.name || 'Unknown engine'}</p>
+  <p>🧠 <b>CPU:</b> ${cpu.architecture || 'Unknown CPU architecture'}</p>
 
-<b>=== 🔍 FINGERPRINT ===</b>
-🖌️ <b>Canvas:</b>       ${fingerprintData?.canvas ? 'Present' : 'No'}
-🎮 <b>WebGL:</b>        ${fingerprintData?.webgl ? (typeof fingerprintData.webgl === 'string' ? fingerprintData.webgl : 'Vendor: ' + fingerprintData.webgl.vendor) : 'No'}
-🎧 <b>Audio:</b>        ${fingerprintData?.audio ? fingerprintData.audio + ' chars' : 'No'}
-🧩 <b>Plugins:</b>      ${fingerprintData?.plugins ? fingerprintData.plugins.split('|').length + ' plugins' : 'No'}
-✒️ <b>Fonts:</b>        ${fingerprintData?.fonts ? fingerprintData.fonts.split(',').length + ' fonts' : 'No'}
-👆 <b>Touch:</b>        ${fingerprintData?.touch ? 'Supported' : 'No'}
-⚙️ <b>Hardware:</b>     ${fingerprintData?.hardware ? `${fingerprintData.hardware.cores} cores, ${fingerprintData.hardware.memory}GB RAM` : 'No'}
+  <h2 style="color: #2563eb;">=== 🔗 NETWORK ===</h2>
+  <p>📶 <b>Connection:</b> ${connectionType}</p>
+  <p>🚫 <b>DNT Header:</b> ${dnt}</p>
+  <p>🔗 <b>Referrer:</b> ${referrer}</p>
 
-<b>=== 🔗 NETWORK & PRIVACY ===</b>
-📶 <b>Connection:</b>   ${connectionType}
-🚫 <b>DNT Header:</b>   ${dnt} (Do Not Track)
-🍪 <b>Cookies:</b>      ${cookiesEnabled}
-🗣️ <b>Languages:</b>    ${languagePrefs}
-🔗 <b>Referrer:</b>     ${referrer}
+  <h2 style="color: #2563eb;">=== 📊 SESSION ===</h2>
+  <p>⏱️ <b>Duration:</b> ${sessionDuration}</p>
+  <p>📊 <b>Page Views:</b> ${pageViews}</p>
 
-<b>=== 📊 SESSION ===</b>
-⏱️ <b>Duration:</b>     ${sessionDuration}
-📊 <b>Page Views:</b>   ${pageViews}
-👾 <b>Fingerprint:</b>  ${sessionData?.fingerprint || 'unknown'}
-
-<b>=== 🕵️ USER AGENT ===</b>
-${userAgent}
+  <h2 style="color: #2563eb;">=== 🕵️ USER AGENT ===</h2>
+  <pre>${userAgent}</pre>
+</div>
 `;
 }
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Tracker running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+});
