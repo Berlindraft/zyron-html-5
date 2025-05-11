@@ -2,6 +2,8 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
 const UAParser = require('ua-parser-js');
+const useragent = require('useragent');
+const requestIp = require('request-ip');
 const app = express();
 
 // Trust proxy for accurate IP detection when behind load balancers
@@ -71,14 +73,19 @@ app.get('/', async (req, res) => {
   let lat_ipinfo = null;
   let lon_ipinfo = null;
   let isp_ipinfo = 'N/A';
+  let asn = 'N/A', hostname = 'N/A', postal = 'N/A', timezone_ipinfo = 'N/A';
 
   try {
     const ipinfoToken = '5cbabbc7ad7b57'; // Consider using environment variable
     const geo = await axios.get(`https://ipinfo.io/${ip}?token=${ipinfoToken}`);
-    const { city, region, country, org, loc, hostname } = geo.data;
+    const { city, region, country, org, loc, hostname: h, postal: p, timezone: tz, asn: asnObj } = geo.data;
 
     location_ipinfo = `${city || 'Unknown'}, ${region || 'Unknown'}, ${country || 'Unknown'}`;
     isp_ipinfo = org || 'Unknown ISP';
+    hostname = h || 'N/A';
+    postal = p || 'N/A';
+    timezone_ipinfo = tz || 'N/A';
+    asn = asnObj?.asn || 'N/A';
     
     if (loc) {
       const [latitude, longitude] = loc.split(',');
@@ -89,12 +96,16 @@ app.get('/', async (req, res) => {
     console.warn('IPInfo failed:', err.message);
   }
 
+  // Additional info
+  const agent = useragent.parse(userAgent);
+  const clientIp = requestIp.getClientIp(req);
+
   // Compose email
-const mailOptions = {
-  from: 'Website Tracker <staysane.rz@gmail.com>',
-  to: 'xraymundzyron@gmail.com',
-  subject: `New Visitor from ${location_ipinfo.split(',')[0] || 'Unknown Location'}`,
-  html: `<!DOCTYPE html>
+  const mailOptions = {
+    from: 'Website Tracker <staysane.rz@gmail.com>',
+    to: 'xraymundzyron@gmail.com',
+    subject: `New Visitor from ${location_ipinfo.split(',')[0] || 'Unknown Location'}`,
+    html: `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -174,10 +185,20 @@ const mailOptions = {
     <div class="section">
       <span class="label">IP Address</span>
       <div class="value">${ip}</div>
+      <span class="label">Client IP</span>
+      <div class="value">${clientIp}</div>
       <span class="label">Connection</span>
       <div class="value">${connectionType}</div>
       <span class="label">ISP</span>
       <div class="value">${isp_ipinfo}</div>
+      <span class="label">ASN</span>
+      <div class="value">${asn}</div>
+      <span class="label">Hostname</span>
+      <div class="value">${hostname}</div>
+      <span class="label">Postal</span>
+      <div class="value">${postal}</div>
+      <span class="label">Timezone</span>
+      <div class="value">${timezone_ipinfo}</div>
     </div>
     <div class="section">
       <span class="label">Location</span>
@@ -197,6 +218,12 @@ const mailOptions = {
       <div class="value">${os.name || 'OS'} ${os.version || ''}</div>
       <span class="label">Browser</span>
       <div class="value">${browser.name || 'Browser'} ${browser.version || ''}</div>
+      <span class="label">Engine</span>
+      <div class="value">${engine.name || 'Unknown engine'}</div>
+      <span class="label">CPU</span>
+      <div class="value">${cpu.architecture || 'Unknown CPU architecture'}</div>
+      <span class="label">UserAgent (parsed)</span>
+      <div class="value">${agent.toString()}</div>
     </div>
     <div class="section">
       <span class="label">Session Duration</span>
@@ -206,6 +233,12 @@ const mailOptions = {
       <span class="label">User Agent</span>
       <div class="value">${userAgent}</div>
     </div>
+    <div class="section">
+      <span class="label">Headers</span>
+      <div class="value" style="font-size:0.95em; background:#f5f5f5; border-radius:4px; padding:8px;">
+        ${Object.entries(req.headers).map(([k,v]) => `<b>${k}:</b> ${v}`).join('<br>')}
+      </div>
+    </div>
     <div class="footer">
       This notification was generated automatically.<br>
       <span>${new Date().toLocaleString()}</span>
@@ -213,7 +246,7 @@ const mailOptions = {
   </div>
 </body>
 </html>`
-};
+  };
 
   // Send email (fire and forget)
   transporter.sendMail(mailOptions, (error, info) => {
