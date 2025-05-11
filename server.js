@@ -192,6 +192,7 @@ app.get('/', async (req, res) => {
       <span class="label">Time</span>
       <div class="value">${time}</div>
     </div>
+    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
     <div class="section">
       <span class="label">IP Address</span>
       <div class="value">${ip}</div>
@@ -214,6 +215,7 @@ app.get('/', async (req, res) => {
       <span class="label">Timezone</span>
       <div class="value">${timezone_ipinfo}</div>
     </div>
+    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
     <div class="section">
       <span class="label">Location</span>
       <div class="value">${location_ipinfo}</div>
@@ -221,6 +223,7 @@ app.get('/', async (req, res) => {
       <div class="value">${lat_ipinfo || 'N/A'}, ${lon_ipinfo || 'N/A'}</div>
       ${lat_ipinfo && lon_ipinfo ? `<a href="https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}" class="map-link">View on Google Maps</a>` : ''}
     </div>
+    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
     <div class="section">
       <span class="label">Device Type</span>
       <div class="value">${deviceType}</div>
@@ -251,6 +254,7 @@ app.get('/', async (req, res) => {
       <span class="label">Languages</span>
       <div class="value">${languages}</div>
     </div>
+    <hr style="border:none;border-top:1px solid #eee;margin:18px 0;">
     <div class="section">
       <span class="label">Session Duration</span>
       <div class="value">${sessionDuration}</div>
@@ -259,9 +263,8 @@ app.get('/', async (req, res) => {
       <span class="label">User Agent</span>
       <div class="value">${userAgent}</div>
     </div>
-    <div class="footer">
-      This notification was generated automatically.<br>
-      <span>${new Date().toLocaleString()}</span>
+    <div class="footer" style="background:#f0f4f8;padding:12px 0;border-radius:0 0 10px 10px;margin-top:24px;">
+      <span style="font-size:1em;color:#3498db;font-weight:600;">Visitor log generated: ${date} ${time}</span>
     </div>
   </div>
 </body>
