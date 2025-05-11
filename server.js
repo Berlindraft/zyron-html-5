@@ -97,162 +97,120 @@ const mailOptions = {
   html: `<!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>New Visitor Notification</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #f9f9f9;
-        }
-        .container {
-            background-color: white;
-            border-radius: 8px;
-            padding: 25px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #2c3e50;
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 10px;
-            margin-top: 0;
-        }
-        h2 {
-            color: #3498db;
-            margin-top: 25px;
-            font-size: 1.3em;
-        }
-        .info-grid {
-            display: grid;
-            grid-template-columns: 30px auto;
-            gap: 10px;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .emoji {
-            font-size: 1.2em;
-            text-align: center;
-        }
-        .label {
-            font-weight: bold;
-            color: #7f8c8d;
-        }
-        .value {
-            margin-left: 40px;
-            word-break: break-all;
-        }
-        .map-link {
-            display: inline-block;
-            background-color: #3498db;
-            color: white;
-            padding: 8px 15px;
-            border-radius: 4px;
-            text-decoration: none;
-            margin-top: 5px;
-        }
-        .map-link:hover {
-            background-color: #2980b9;
-        }
-        .json {
-            background-color: #f5f5f5;
-            padding: 10px;
-            border-radius: 4px;
-            font-family: monospace;
-            white-space: pre-wrap;
-            overflow-x: auto;
-        }
-        .footer {
-            margin-top: 30px;
-            font-size: 0.9em;
-            color: #95a5a6;
-            text-align: center;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Visitor Notification</title>
+  <style>
+    body {
+      background: #f7f7f7;
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      color: #222;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      max-width: 98vw;
+      margin: 18px auto;
+      padding: 20px 5vw 18px 5vw;
+      box-shadow: 0 2px 8px rgba(44,62,80,0.08);
+    }
+    h1 {
+      font-size: 1.3em;
+      color: #3498db;
+      margin: 0 0 18px 0;
+      text-align: center;
+    }
+    .section {
+      margin-bottom: 18px;
+    }
+    .label {
+      color: #888;
+      font-size: 1em;
+      font-weight: 600;
+      display: block;
+      margin-bottom: 2px;
+    }
+    .value {
+      font-size: 1.08em;
+      margin-bottom: 10px;
+      word-break: break-all;
+    }
+    .map-link {
+      display: inline-block;
+      background: #3498db;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 4px;
+      text-decoration: none;
+      font-size: 1em;
+      margin-top: 8px;
+    }
+    .footer {
+      text-align: center;
+      color: #aaa;
+      font-size: 0.95em;
+      margin-top: 24px;
+    }
+    @media (max-width: 480px) {
+      .card { padding: 12px 2vw; }
+      h1 { font-size: 1.1em; }
+      .value, .label { font-size: 1em; }
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🚀 New website visit detected!</h1>
-        
-        <h2>📅 TIMESTAMP</h2>
-        <div class="info-grid">
-            <div class="emoji">📅</div>
-            <div><span class="label">Day:</span> ${day}</div>
-            <div class="emoji">📆</div>
-            <div><span class="label">Date:</span> ${date}</div>
-            <div class="emoji">⏰</div>
-            <div><span class="label">Time:</span> ${time}</div>
-        </div>
-
-        <h2>🌐 NETWORK</h2>
-        <div class="info-grid">
-            <div class="emoji">🌐</div>
-            <div><span class="label">IP Address:</span> ${ip}</div>
-            <div class="emoji">🔌</div>
-            <div><span class="label">Connection:</span> ${connectionType}</div>
-            <div class="emoji">📡</div>
-            <div><span class="label">ISP:</span> ${isp_ipinfo}</div>
-        </div>
-
-        <h2>📍 LOCATION</h2>
-        <div class="info-grid">
-            <div class="emoji">📍</div>
-            <div><span class="label">Location:</span> ${location_ipinfo}</div>
-            <div class="emoji">🧭</div>
-            <div><span class="label">Coordinates:</span> ${lat_ipinfo || 'N/A'}, ${lon_ipinfo || 'N/A'}</div>
-        </div>
-        ${lat_ipinfo && lon_ipinfo ? 
-          `<a href="https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}" class="map-link">View on Google Maps</a>` : 
-          '<div style="color: #95a5a6;">Location unavailable for mapping</div>'}
-
-        <h2>📱 DEVICE</h2>
-        <div class="info-grid">
-            <div class="emoji">📱</div>
-            <div><span class="label">Device Type:</span> ${deviceType}</div>
-            <div class="emoji">🏷️</div>
-            <div><span class="label">Brand:</span> ${device.vendor || 'Unknown'}</div>
-            <div class="emoji">🖥️</div>
-            <div><span class="label">Model:</span> ${device.model || 'Unknown'}</div>
-            <div class="emoji">💻</div>
-            <div><span class="label">OS:</span> ${os.name || 'OS'} ${os.version || ''}</div>
-            <div class="emoji">🌐</div>
-            <div><span class="label">Browser:</span> ${browser.name || 'Browser'} ${browser.version || ''}</div>
-            <div class="emoji">⚙️</div>
-            <div><span class="label">Engine:</span> ${engine.name || 'Unknown engine'}</div>
-            <div class="emoji">🔧</div>
-            <div><span class="label">CPU:</span> ${cpu.architecture || 'Unknown CPU architecture'}</div>
-        </div>
-
-        <h2>⏱️ SESSION</h2>
-        <div class="info-grid">
-            <div class="emoji">⏱️</div>
-            <div><span class="label">Duration:</span> ${sessionDuration}</div>
-            <div class="emoji">🔗</div>
-            <div><span class="label">Referrer:</span> ${referrer}</div>
-        </div>
-        <div class="value">
-            <span class="label">User Agent:</span><br>
-            ${userAgent}
-        </div>
-
-        <h2>📶 ADDITIONAL INFO</h2>
-        <div class="json">
-            ${JSON.stringify({
-                'x-forwarded-for': req.headers['x-forwarded-for'],
-                'cf-connecting-ip': req.headers['cf-connecting-ip'],
-                'x-real-ip': req.headers['x-real-ip']
-            }, null, 2)}
-        </div>
-
-        <div class="footer">
-            <p>This notification was generated automatically by your website tracker.</p>
-            <p>${new Date().toLocaleString()}</p>
-        </div>
+  <div class="card">
+    <h1>🚀 New Website Visit Detected</h1>
+    <div class="section">
+      <span class="label">Day</span>
+      <div class="value">${day}</div>
+      <span class="label">Date</span>
+      <div class="value">${date}</div>
+      <span class="label">Time</span>
+      <div class="value">${time}</div>
     </div>
+    <div class="section">
+      <span class="label">IP Address</span>
+      <div class="value">${ip}</div>
+      <span class="label">Connection</span>
+      <div class="value">${connectionType}</div>
+      <span class="label">ISP</span>
+      <div class="value">${isp_ipinfo}</div>
+    </div>
+    <div class="section">
+      <span class="label">Location</span>
+      <div class="value">${location_ipinfo}</div>
+      <span class="label">Coordinates</span>
+      <div class="value">${lat_ipinfo || 'N/A'}, ${lon_ipinfo || 'N/A'}</div>
+      ${lat_ipinfo && lon_ipinfo ? `<a href="https://www.google.com/maps?q=${lat_ipinfo},${lon_ipinfo}" class="map-link">View on Google Maps</a>` : ''}
+    </div>
+    <div class="section">
+      <span class="label">Device Type</span>
+      <div class="value">${deviceType}</div>
+      <span class="label">Brand</span>
+      <div class="value">${device.vendor || 'Unknown'}</div>
+      <span class="label">Model</span>
+      <div class="value">${device.model || 'Unknown'}</div>
+      <span class="label">OS</span>
+      <div class="value">${os.name || 'OS'} ${os.version || ''}</div>
+      <span class="label">Browser</span>
+      <div class="value">${browser.name || 'Browser'} ${browser.version || ''}</div>
+    </div>
+    <div class="section">
+      <span class="label">Session Duration</span>
+      <div class="value">${sessionDuration}</div>
+      <span class="label">Referrer</span>
+      <div class="value">${referrer}</div>
+      <span class="label">User Agent</span>
+      <div class="value">${userAgent}</div>
+    </div>
+    <div class="footer">
+      This notification was generated automatically.<br>
+      <span>${new Date().toLocaleString()}</span>
+    </div>
+  </div>
 </body>
 </html>`
 };
